@@ -1,0 +1,38 @@
+IFDHandler for the ST Kerkey
+============================
+
+This library contains an IFD handler for PCSC lite [1],
+which allows to access the Kerkey via the PCSC lite daemon.
+
+The library uses two Linux kernel interfaces to interact
+with the ST Kerkey:
+
+ * I2C dev ([2]) for data exchange
+ * GPIO sysfs aka. gpiolib ([3]) for resetting the device
+
+Usage
+=====
+
+To use this IFDHandler one needs to specify the reader
+in the reader configuration directory of PCSC lite.
+To do so one has to create a file which specifies the
+communication parameters.
+
+Below is an example how this specification could look like:
+
+cat /etc/reader.conf.d/libifdkerkey
+# ST Kerkey with I2C communication
+#  - N is the I2C bus
+#  - CS is the I2C device address
+#  - GPIO is the reset pin
+#  - name is the reader name (may be ommitted)
+#    Possible reader names are: 
+#     Kerkey (default value)
+# example: /dev/i2c-3:0x20:16
+#DEVICENAME        /dev/i2c-N:CS:GPIO[:name]
+#FRIENDLYNAME      "ST Kerkey (I2C)"
+#LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so
+
+[1] https://pcsclite.alioth.debian.org/
+[2] https://www.kernel.org/doc/Documentation/i2c/dev-interface
+[3] https://www.kernel.org/doc/Documentation/gpio/sysfs.txt
