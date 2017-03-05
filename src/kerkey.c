@@ -106,6 +106,51 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	return 0;
 }
 
+static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t len)
+{
+	const size_t max_attempts = 10000;
+	size_t counter = 0;
+	do {
+		ssize_t sret = read(dev->i2c_fd, buf, len);
+		if (sret == (ssize_t)len) {
+			/* Done */
+			return 0;
+		} else if (sret == -1 && errno == ENXIO) {
+			/* Kerkey not ready yet, let's wait 1 ms */
+			int ret = usleep(1000);
+			if (ret) {
+				Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
+				return -1;
+			}
+		} else if (sret == -1) {
+			Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
+				strerror(errno));
+			return -1;
+		} else {
+			Log1(PCSC_LOG_ERROR, "Could not read length from I2C device");
+			return -1;
+		}
+		counter++;
+	} while(counter < max_attempts);
+
+	Log1(PCSC_LOG_ERROR, "Read timed out");
+	return -1;
+}
+
+static int kerkey_write_i2c(struct kerkey_dev *dev, const unsigned char *buf, size_t len)
+{
+	ssize_t sret = write(dev->i2c_fd, buf, len);
+	if (sret == -1) {
+		Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
+			strerror(errno));
+		return -1;
+	} else if (sret != (ssize_t)len) {
+		Log3(PCSC_LOG_ERROR, "Wrote only %zi of %zu bytes", sret, len);
+		return -1;
+	}
+	return 0;
+}
+
 static int open_kerkey_i2c(struct kerkey_dev *dev)
 {
 	/* Open I2C device */
@@ -318,31 +363,16 @@ static void close_kerkey_dev(struct kerkey_dev *dev)
 static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
 {
 	const unsigned char cmd = 0x76;
-
-	ssize_t sret = write(dev->i2c_fd, &cmd, 1);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != 1) {
-		Log2(PCSC_LOG_ERROR, "Wrote only %zi of 1 byte", sret);
-		return -1;
-	}
-
-	int ret = usleep(200*1000);
+	int ret = kerkey_write_i2c(dev, &cmd, 1);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
+		Log1(PCSC_LOG_ERROR, "Failed to write command");
 		return -1;
 	}
 
 	unsigned char res[2];
-	sret = read(dev->i2c_fd, res, 2);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != 2) {
-		Log1(PCSC_LOG_ERROR, "Could not read length from I2C device");
+	ret = kerkey_read_i2c(dev, res, 2);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading response failed!\n");
 		return -1;
 	}
 
@@ -363,13 +393,9 @@ static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
 
 	dev->atr_len = rlen;
 
-	sret = read(dev->i2c_fd, dev->atr, rlen);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != rlen) {
-		Log1(PCSC_LOG_ERROR, "Could not read enough from I2C device");
+	ret = kerkey_read_i2c(dev, dev->atr, rlen);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading ATR failed!\n");
 		return -1;
 	}
 
@@ -490,7 +516,7 @@ int kerkey_xfer(struct reader *r, unsigned char *tx_buf, size_t tx_len, unsigned
 	size_t rx_off = 0;
 	size_t rx_buf_len = *rx_len;
 	size_t len;
-	ssize_t sret;
+	int ret;
 	unsigned char res[2];
 
 	Log2(PCSC_LOG_DEBUG, "tx_len: %zu", tx_len);
@@ -499,33 +525,20 @@ int kerkey_xfer(struct reader *r, unsigned char *tx_buf, size_t tx_len, unsigned
 
 send:
 	len = tx_len > 254 ? 254 : tx_len;
-	sret = write(dev->i2c_fd, tx_buf + tx_off, len);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != (ssize_t)len) {
-		Log3(PCSC_LOG_ERROR, "Wrote only %zi of %zu bytes", sret, len);
+
+	ret = kerkey_write_i2c(dev, tx_buf + tx_off, len);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Writing data failed!\n");
 		return -1;
 	}
 
 	tx_off += len;
 	tx_len -= len;
 
-	int ret = usleep(1000*1000);
-	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
-		return -1;
-	}
-
 read_res:
-	sret = read(dev->i2c_fd, res, 2);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != 2) {
-		Log1(PCSC_LOG_ERROR, "Could not read length from I2C device");
+	ret = kerkey_read_i2c(dev, res, 2);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading response failed!\n");
 		return -1;
 	}
 
@@ -534,7 +547,7 @@ read_res:
 
 	if (!chain && rlen == 0) {
 		/* waiting time extension */
-		ret = usleep(100*1000);
+		ret = usleep(1000);
 		if (ret) {
 			Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
 			return -1;
@@ -555,13 +568,9 @@ read_res:
 		return -1;
 	}
 
-	sret = read(dev->i2c_fd, rx_buf + rx_off, rlen);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != rlen) {
-		Log1(PCSC_LOG_ERROR, "Could not read enough from I2C device");
+	ret = kerkey_read_i2c(dev, rx_buf + rx_off, rlen);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading data failed!\n");
 		return -1;
 	}
 
