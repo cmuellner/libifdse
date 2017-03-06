@@ -33,6 +33,9 @@
 #include "utils.h"
 #include "kerkey.h"
 
+#define KERKEY_CMD_TIMEOUT 0x75
+#define KERKEY_CMD_ATR 0x76
+
 struct kerkey_dev
 {
 	/* parsed data */
@@ -44,6 +47,7 @@ struct kerkey_dev
 	int gpio_fd; /* File descriptor to GPIO */
 	unsigned char *atr;
 	size_t atr_len;
+	size_t timeout_ms;
 };
 
 static int validate_reader_name(char *reader_name)
@@ -108,7 +112,7 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 
 static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t len)
 {
-	const size_t max_attempts = 10000;
+	const size_t max_attempts = dev->timeout_ms;
 	size_t counter = 0;
 	do {
 		ssize_t sret = read(dev->i2c_fd, buf, len);
@@ -360,9 +364,9 @@ static void close_kerkey_dev(struct kerkey_dev *dev)
 	close_kerkey_gpio(dev);
 }
 
-static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
+static int kerkey_get_timeout_dev(struct kerkey_dev *dev)
 {
-	const unsigned char cmd = 0x76;
+	const unsigned char cmd = KERKEY_CMD_TIMEOUT;
 	int ret = kerkey_write_i2c(dev, &cmd, 1);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Failed to write command");
@@ -372,7 +376,44 @@ static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
 	unsigned char res[2];
 	ret = kerkey_read_i2c(dev, res, 2);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Reading response failed!\n");
+		Log1(PCSC_LOG_ERROR, "Reading response failed!");
+		return -1;
+	}
+
+	bool chain = (res[0] & 0x80) ? 1 : 0;
+	short rlen = ((res[0] << 8) | res[1]) & 0x00ff;
+
+	if (chain || rlen != 2) {
+		Log1(PCSC_LOG_ERROR, "Could not get timeout");
+		return -1;
+	}
+
+	ret = kerkey_read_i2c(dev, res, 2);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading ATR failed!");
+		return -1;
+	}
+
+	dev->timeout_ms = (res[0] << 8) | res[1];
+
+	Log2(PCSC_LOG_DEBUG, "Set card timeout to: %zu", dev->timeout_ms);
+
+	return 0;
+}
+
+static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
+{
+	const unsigned char cmd = KERKEY_CMD_ATR;
+	int ret = kerkey_write_i2c(dev, &cmd, 1);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Failed to write command");
+		return -1;
+	}
+
+	unsigned char res[2];
+	ret = kerkey_read_i2c(dev, res, 2);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Reading response failed!");
 		return -1;
 	}
 
@@ -380,7 +421,7 @@ static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
 	short rlen = ((res[0] << 8) | res[1]) & 0x00ff;
 
 	if (chain || rlen == 0) {
-		Log1(PCSC_LOG_ERROR, "Could not trigger soft reset!");
+		Log1(PCSC_LOG_ERROR, "Could not trigger warm reset!");
 		return -1;
 	}
 
@@ -395,7 +436,14 @@ static int kerkey_warm_reset_dev(struct kerkey_dev *dev)
 
 	ret = kerkey_read_i2c(dev, dev->atr, rlen);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Reading ATR failed!\n");
+		Log1(PCSC_LOG_ERROR, "Reading ATR failed!");
+		return -1;
+	}
+
+	/* CMD_ATR triggers a warm reset, which takes some time */
+	ret = usleep(200*1000);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
 		return -1;
 	}
 
@@ -438,6 +486,7 @@ int kerkey_open(struct reader *r, char *device)
 	dev->reset_gpio = reset_gpio;
 	dev->reader_name = reader_name;
 	dev->atr = NULL;
+	dev->timeout_ms = 10000;
 
 	ret = open_kerkey_dev(dev);
 	if (ret) {
@@ -449,6 +498,13 @@ int kerkey_open(struct reader *r, char *device)
 	ret = kerkey_warm_reset_dev(dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not reset Kerkey!");
+		close_kerkey_dev(dev);
+		goto fail;
+	}
+
+	ret = kerkey_get_timeout_dev(dev);
+	if (ret) {
+		Log1(PCSC_LOG_ERROR, "Could not get timeout!");
 		close_kerkey_dev(dev);
 		goto fail;
 	}
@@ -528,7 +584,7 @@ send:
 
 	ret = kerkey_write_i2c(dev, tx_buf + tx_off, len);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Writing data failed!\n");
+		Log1(PCSC_LOG_ERROR, "Writing data failed!");
 		return -1;
 	}
 
@@ -538,7 +594,7 @@ send:
 read_res:
 	ret = kerkey_read_i2c(dev, res, 2);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Reading response failed!\n");
+		Log1(PCSC_LOG_ERROR, "Reading response failed!");
 		return -1;
 	}
 
@@ -570,7 +626,7 @@ read_res:
 
 	ret = kerkey_read_i2c(dev, rx_buf + rx_off, rlen);
 	if (ret) {
-		Log1(PCSC_LOG_ERROR, "Reading data failed!\n");
+		Log1(PCSC_LOG_ERROR, "Reading data failed!");
 		return -1;
 	}
 
