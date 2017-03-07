@@ -2,7 +2,7 @@ TOPDIR=$(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 SRC_DIR=$(TOPDIR)/src
 
 CC=$(CROSS_COMPILE)gcc
-CFLAGS+=-Wall -Wextra -O2
+CFLAGS+=-Wall -Wextra -Werror -O2
 RM=rm -f
 
 export CC CFLAGS RM
