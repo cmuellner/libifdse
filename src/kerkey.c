@@ -630,6 +630,7 @@ read_res:
 		return -1;
 	}
 
+	rx_off += rlen;
 	*rx_len += rlen;
 
 	if (chain)
