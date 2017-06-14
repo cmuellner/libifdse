@@ -575,11 +575,11 @@ int kerkey_xfer(struct reader *r, unsigned char *tx_buf, size_t tx_len, unsigned
 	int ret;
 	unsigned char res[2];
 
-	Log2(PCSC_LOG_DEBUG, "tx_len: %zu", tx_len);
-
 	*rx_len = 0;
 
 send:
+	Log2(PCSC_LOG_DEBUG, "tx_len: %zu", tx_len);
+
 	len = tx_len > 254 ? 254 : tx_len;
 
 	ret = kerkey_write_i2c(dev, tx_buf + tx_off, len);
@@ -602,7 +602,7 @@ read_res:
 	short rlen = ((res[0] << 8) | res[1]) & 0x00ff;
 
 	if (!chain && rlen == 0) {
-		/* waiting time extension */
+		Log1(PCSC_LOG_DEBUG, "Received WTX");
 		ret = usleep(1000);
 		if (ret) {
 			Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
@@ -612,11 +612,10 @@ read_res:
 	}
 
 	if (tx_len != 0) {
-		if (!chain || rlen != 0) {
-			Log1(PCSC_LOG_ERROR, "Communication error!");
-			return -1;
-		}
-		goto send;
+		if (chain && rlen == 0x00)
+			goto send;
+
+		Log1(PCSC_LOG_DEBUG, "Response although no everything sent!");
 	}
 
 	if (rx_off + rlen > rx_buf_len) {
