@@ -417,6 +417,7 @@ static int kerkey_get_timeout_dev(struct kerkey_dev *dev)
 	}
 
 	unsigned char res[2];
+read_res:
 	ret = kerkey_read_i2c(dev, res, 2);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Reading response failed!");
@@ -425,6 +426,16 @@ static int kerkey_get_timeout_dev(struct kerkey_dev *dev)
 
 	bool chain = (res[0] & 0x80) ? 1 : 0;
 	short rlen = ((res[0] << 8) | res[1]) & 0x00ff;
+
+	if (!chain && rlen == 0) {
+		Log1(PCSC_LOG_DEBUG, "Received WTX");
+		ret = usleep(1000);
+		if (ret) {
+			Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
+			return -1;
+		}
+		goto read_res;
+	}
 
 	if (chain || rlen != 2) {
 		Log1(PCSC_LOG_ERROR, "Could not get timeout");
