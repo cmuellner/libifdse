@@ -15,6 +15,7 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -27,6 +28,7 @@
 #include <sys/stat.h>
 
 #include <linux/i2c-dev.h>
+#include <linux/gpio.h>
 
 #include <debuglog.h>
 
@@ -41,8 +43,9 @@ struct kerkey_dev
 	/* parsed data */
 	char *i2c_device; /* I2C device (e.g. "/dev/i2c-0") */
 	int i2c_addr; /* I2C slave addr (e.g. 0x20) */
-	int reset_gpio; /* GPIO of reset line (e.g. 16) */
-	int reset_gpio_active_low; /* Reset line is active low */
+	int gpiochip; /* GPIO chip of reset line (e.g. 0) */
+	int gpioline; /* GPIO of reset line (e.g. 16) */
+	int gpioline_active_low; /* Reset line is active low */
 	char *reader_name; /* I2C device name (e.g. "Kerkey") */
 	int i2c_fd; /* File descriptor to I2C device */
 	int gpio_fd; /* File descriptor to GPIO */
@@ -59,16 +62,20 @@ static int validate_reader_name(char *reader_name)
 }
 
 /*
+ * Parse the information encoded in a string with the following pattern:
+ * 	"<i2c_device>:<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>"
+ *
  * Note, that all provided strings are allocated on the heap
  * and need to be freed later.
  */
 static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
-	int *reset_gpio, int *reset_gpio_active_low, char **reader_name)
+	int *gpiochip, int *gpioline,
+	int *gpioline_active_low, char **reader_name)
 {
 	char *p = device;
 
 	/* Advance p after the first ':' in
-	 * the pattern "<i2c_device>:<i2c_addr>:<reset_pin>:<name>" */
+	 * the pattern "<i2c_device>:<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
 	p = strchr(p, ':');
 	if (!p) {
 		Log2(PCSC_LOG_ERROR, "No I2C slave address defined in '%s'", device);
@@ -78,12 +85,12 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	Log2(PCSC_LOG_DEBUG, "i2c_device: %s", *i2c_device);
 	p++;
 
-	/* parse i2c_addr from the pattern "<i2c_addr>:<reset_pin>:<name>" */
+	/* parse i2c_addr from the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
 	*i2c_addr = (int)strtol(p, NULL, 0);
 	Log2(PCSC_LOG_DEBUG, "i2c_addr: %d", *i2c_addr);
 
 	/* Advance p after the first ':' in
-	 * the pattern "<i2c_addr>:<reset_pin>:<name>" */
+	 * the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
 	p = strchr(p, ':');
 	if (!p) {
 		free(*i2c_device);
@@ -93,19 +100,36 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	}
 	p++;
 
-	/* parse reset_pin from the pattern "<reset_pin>:<name>" */
-	*reset_gpio = (size_t)strtol(p, NULL, 0);
-	if (*reset_gpio < 0) {
-		*reset_gpio = -(*reset_gpio);
-		*reset_gpio_active_low = 1;
-	} else {
-		*reset_gpio_active_low = 0;
-	}
-	Log2(PCSC_LOG_DEBUG, "reset_gpio: %d", *reset_gpio);
-	Log2(PCSC_LOG_DEBUG, "reset_gpio_active_low: %d", *reset_gpio_active_low);
+	/* parse the gpiochip from the pattern "<gpiochip>:<[n]gpioline>:name" */
+	*gpiochip = (int)strtol(p, NULL, 0);
+	Log2(PCSC_LOG_DEBUG, "gpiochip: %d", *gpiochip);
 
 	/* Advance p after the first ':' in
-	 * the pattern "<reset_pin>:<name>" */
+	 * the pattern "<gpiochip>:<[n]gpioline>:<name>" */
+	p = strchr(p, ':');
+	if (!p) {
+		free(*i2c_device);
+		*i2c_device = NULL;
+		Log2(PCSC_LOG_ERROR, "No reset pin defined in '%s'", device);
+		return -1;
+	}
+	p++;
+
+	/* parse an optional 'n' as the active_low indicator */
+	if (*p == 'n') {
+		*gpioline_active_low = 1;
+		p++; /* advance */
+	} else {
+		*gpioline_active_low = 0;
+	}
+	Log2(PCSC_LOG_DEBUG, "gpioline_active_low: %d", *gpioline_active_low);
+
+	/* parse reset_pin from the pattern "<gpioline>:<name>" */
+	*gpioline = (size_t)strtol(p, NULL, 0);
+	Log2(PCSC_LOG_DEBUG, "gpioline: %d", *gpioline);
+
+	/* Advance p after the first ':' in
+	 * the pattern "<gpioline>:<name>" */
 	p = strchr(p, ':');
 	if (!p) {
 		*reader_name = strdup("Kerkey");
@@ -127,7 +151,7 @@ static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t le
 		if (sret == (ssize_t)len) {
 			/* Done */
 			return 0;
-		} else if (sret == -1 && errno == ENXIO) {
+		} else if (sret == -1 && (errno == ENXIO || errno == ETIMEDOUT)) {
 			/* Kerkey not ready yet, let's wait 1 ms */
 			int ret = usleep(1000);
 			if (ret) {
@@ -197,10 +221,14 @@ static void close_kerkey_i2c(struct kerkey_dev *dev)
 
 static int kerkey_power_up_gpio(struct kerkey_dev *dev)
 {
-	const char* up_string = "1";
-	ssize_t sret = write(dev->gpio_fd, up_string, strlen(up_string));
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Could not write to value file (%s)",
+	int ret;
+	struct gpiohandle_data data;
+
+	data.values[0] = 1;
+
+	ret = ioctl(dev->gpio_fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
+	if (ret == -1) {
+		Log2(PCSC_LOG_ERROR, "Could not set GPIO value (%s)",
 			strerror(errno));
 		return -1;
 	}
@@ -209,10 +237,14 @@ static int kerkey_power_up_gpio(struct kerkey_dev *dev)
 
 static int kerkey_power_down_gpio(struct kerkey_dev *dev)
 {
-	const char* off_string = "0";
-	ssize_t sret = write(dev->gpio_fd, off_string, strlen(off_string));
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Could not write to value file (%s)",
+	int ret;
+	struct gpiohandle_data data;
+
+	data.values[0] = 0;
+
+	ret = ioctl(dev->gpio_fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
+	if (ret == -1) {
+		Log2(PCSC_LOG_ERROR, "Could not set GPIO value (%s)",
 			strerror(errno));
 		return -1;
 	}
@@ -221,154 +253,81 @@ static int kerkey_power_down_gpio(struct kerkey_dev *dev)
 
 static int open_kerkey_gpio(struct kerkey_dev *dev)
 {
-	int ret;
+	int ret = 0;
+	char *chrdev_name;
+	struct gpiohandle_request req;
+	int fd;
 
-	/* Prepare export string */
-	char export_string[5];
-	ret = snprintf(export_string, sizeof(export_string),
-		"%d", dev->reset_gpio);
-	if (ret >= (int)sizeof(export_string)) {
-		Log1(PCSC_LOG_ERROR, "Could not prepare export string!");
-		return -1;
+	ret = asprintf(&chrdev_name, "/dev/gpiochip%d", dev->gpiochip);
+	if (ret < 0)
+		return -ENOMEM;
+
+	fd = open(chrdev_name, 0);
+	if (fd == -1) {
+		Log3(PCSC_LOG_ERROR, "Could not open GPIO chip file %s (%s)",
+			chrdev_name, strerror(errno));
+		ret = -1;
+		goto err;
 	}
 
-	/* Open export file */
-	const char *export_filename = "/sys/class/gpio/export";
-	int export_fd = open(export_filename, O_WRONLY);
-	if (export_fd == -1) {
-		Log2(PCSC_LOG_ERROR, "Could not open export file (%s)",
+	req.lineoffsets[0] = dev->gpioline;
+	req.flags = GPIOHANDLE_REQUEST_OUTPUT;
+	strcpy(req.consumer_label, "libifdkerkey");
+	req.lines = 1;
+	req.default_values[0] = 0;
+
+	if (dev->gpioline_active_low)
+		req.flags |= GPIOHANDLE_REQUEST_ACTIVE_LOW;
+
+	ret = ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req);
+	if (ret) {
+		Log2(PCSC_LOG_ERROR, "Could not get GPIO lines (%s)",
 			strerror(errno));
-		return -1;
+		goto end;
 	}
 
-	/* Export the GPIO */
-	ssize_t sret = write(export_fd, export_string, strlen(export_string));
-	if (sret == -1 && errno != EBUSY) {
-		Log2(PCSC_LOG_ERROR, "Could not write to export file (%s)",
-			strerror(errno));
-		close(export_fd);
-		return -1;
-	}
-
-	if (sret == -1 && errno == EBUSY)
-		Log1(PCSC_LOG_INFO, "Reset GPIO was already exported");
-
-	/* Close export file */
-	close(export_fd);
-
-	/* Prepare gpio active_low filename */
-	char active_low_filename[512];
-	ret = snprintf(active_low_filename, sizeof(active_low_filename),
-		"/sys/class/gpio/gpio%d/active_low", dev->reset_gpio);
-	if (ret >= (int)sizeof(active_low_filename)) {
-		Log1(PCSC_LOG_ERROR, "Could not prepare GPIO active_low filename!");
-		return -1;
-	}
-
-	/* Open active_low file */
-	int active_low_fd = open(active_low_filename, O_RDWR);
-	if (active_low_fd < 0) {
-		Log2(PCSC_LOG_ERROR, "Could not open active_low file (%s)",
-			strerror(errno));
-		return -1;
-	}
-
-	/* Set active_low of GPIO to output */
-	const char* active_low_string = "0";
-	if (dev->reset_gpio_active_low) {
-		active_low_string = "1";
-	}
-	sret = write(active_low_fd, active_low_string, strlen(active_low_string));
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Could not write to active_low file (%s)",
-			strerror(errno));
-		close(active_low_fd);
-		return -1;
-	}
-	
-	/* Close the active_low file */
-	close(active_low_fd);
-
-	/* Prepare gpio direction filename */
-	char direction_filename[512];
-	ret = snprintf(direction_filename, sizeof(direction_filename),
-		"/sys/class/gpio/gpio%d/direction", dev->reset_gpio);
-	if (ret >= (int)sizeof(direction_filename)) {
-		Log1(PCSC_LOG_ERROR, "Could not prepare GPIO direction filename!");
-		return -1;
-	}
-
-	/* Open direction file */
-	int direction_fd = open(direction_filename, O_RDWR);
-	if (direction_fd < 0) {
-		Log2(PCSC_LOG_ERROR, "Could not open direction file (%s)",
-			strerror(errno));
-		return -1;
-	}
-
-	/* Set direction of GPIO to output */
-	const char* direction_string = "out";
-	sret = write(direction_fd, direction_string, strlen(direction_string));
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Could not write to direction file (%s)",
-			strerror(errno));
-		close(direction_fd);
-		return -1;
-	}
-
-	/* Close the direction file */
-	close(direction_fd);
-
-	/* Prepare gpio value filename */
-	char value_filename[512];
-	ret = snprintf(value_filename, sizeof(value_filename),
-		"/sys/class/gpio/gpio%d/value", dev->reset_gpio);
-	if (ret >= (int)sizeof(value_filename)) {
-		Log1(PCSC_LOG_ERROR, "Could not prepare GPIO value filename!");
-		return -1;
-	}
-
-	/* Open the value file */
-	dev->gpio_fd = open(value_filename, O_RDWR);
-	if (dev->gpio_fd < 0) {
-		Log2(PCSC_LOG_ERROR, "Could not open value file (%s)",
-			strerror(errno));
-		return -1;
+	dev->gpio_fd = req.fd;
+	if (dev->gpio_fd == -1) {
+		Log3(PCSC_LOG_ERROR, "Could not open GPIO file %s (%s)",
+			chrdev_name, strerror(errno));
+		ret = -1;
+		goto err;
 	}
 
 	ret = kerkey_power_down_gpio(dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not power down Kerkey!");
-		close(dev->gpio_fd);
-		dev->gpio_fd = -1;
-		return -1;
+		goto err;
 	}
 
 	ret = usleep(200*1000);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
-		close(dev->gpio_fd);
-		dev->gpio_fd = -1;
-		return -1;
+		goto err;
 	}
 
 	ret = kerkey_power_up_gpio(dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not power up Kerkey!");
-		close(dev->gpio_fd);
-		dev->gpio_fd = -1;
-		return -1;
+		goto err;
 	}
 
 	ret = usleep(200*1000);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
-		close(dev->gpio_fd);
-		dev->gpio_fd = -1;
-		return -1;
+		goto err;
 	}
 
-	return 0;
+	goto end;
+
+err:
+	close(dev->gpio_fd);
+	dev->gpio_fd = -1;
+end:
+	close(fd);
+	free(chrdev_name);
+
+	return ret;
 }
 
 static void close_kerkey_gpio(struct kerkey_dev *dev)
@@ -508,8 +467,9 @@ int kerkey_open(struct reader *r, char *device)
 {
 	char *i2c_device = NULL;
 	int i2c_addr;
-	int reset_gpio;
-	int reset_gpio_active_low;
+	int gpiochip;
+	int gpioline;
+	int gpioline_active_low;
 	char *reader_name = NULL;
 	struct kerkey_dev *dev;
 
@@ -522,8 +482,8 @@ int kerkey_open(struct reader *r, char *device)
 	}
 
 	/* Parse device string from reader.conf */
-	int ret = parse_device_string(device, &i2c_device, &i2c_addr,
-			&reset_gpio, &reset_gpio_active_low, &reader_name);
+	int ret = parse_device_string(device, &i2c_device, &i2c_addr, &gpiochip,
+			&gpioline, &gpioline_active_low, &reader_name);
 	if (ret) {
 		Log2(PCSC_LOG_ERROR, "device string can't be parsed: %s", device);
 		goto fail;
@@ -538,10 +498,14 @@ int kerkey_open(struct reader *r, char *device)
 	/* Initialize I2C device */
 	dev->i2c_device = i2c_device;
 	dev->i2c_addr = i2c_addr;
-	dev->reset_gpio = reset_gpio;
-	dev->reset_gpio_active_low = reset_gpio_active_low;
+	dev->gpiochip = gpiochip;
+	dev->gpioline = gpioline;
+	dev->gpioline_active_low = gpioline_active_low;
 	dev->reader_name = reader_name;
+	dev->i2c_fd = -1;
+	dev->gpio_fd = -1;
 	dev->atr = NULL;
+	dev->atr_len = 0;
 	dev->timeout_ms = 10000;
 
 	ret = open_kerkey_dev(dev);
@@ -606,7 +570,9 @@ int kerkey_get_atr(struct reader *r, unsigned char *buf, size_t *len)
 int kerkey_power_up(struct reader *r)
 {
 	struct kerkey_dev *dev = get_reader_prv(r);
-	return kerkey_power_up_gpio(dev);
+	int ret = kerkey_power_up_gpio(dev);
+	usleep(200*1000);
+	return ret;
 }
 
 int kerkey_power_down(struct reader *r)
