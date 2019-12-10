@@ -26,11 +26,8 @@ cat /etc/reader.conf.d/libifdkerkey
 #  - CS is the I2C device address
 #  - GPIOCHIP is the reset pin chip
 #  - GPIOLINE is the reset pin line (prefix with 'n' for active low)
-#  - name is the reader name (may be ommitted)
-#    Possible reader names are: 
-#     Kerkey (default value)
 # example: /dev/i2c-3:0x20:1:n16
-#DEVICENAME        /dev/i2c-N:CS:GPIOCHIP:GPIOLINE[:name]
+#DEVICENAME        /dev/i2c-N:CS:GPIOCHIP:GPIOLINE
 #FRIENDLYNAME      "ST Kerkey (I2C)"
 #LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so
 

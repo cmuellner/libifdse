@@ -46,20 +46,12 @@ struct kerkey_dev
 	int gpiochip; /* GPIO chip of reset line (e.g. 0) */
 	int gpioline; /* GPIO of reset line (e.g. 16) */
 	int gpioline_active_low; /* Reset line is active low */
-	char *reader_name; /* I2C device name (e.g. "Kerkey") */
 	int i2c_fd; /* File descriptor to I2C device */
 	int gpio_fd; /* File descriptor to GPIO */
 	unsigned char *atr;
 	size_t atr_len;
 	size_t timeout_ms;
 };
-
-static int validate_reader_name(char *reader_name)
-{
-	if (strcmp(reader_name, "Kerkey") == 0)
-		return 0;
-	return -1;
-}
 
 /*
  * Parse the information encoded in a string with the following pattern:
@@ -70,12 +62,12 @@ static int validate_reader_name(char *reader_name)
  */
 static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	int *gpiochip, int *gpioline,
-	int *gpioline_active_low, char **reader_name)
+	int *gpioline_active_low)
 {
 	char *p = device;
 
 	/* Advance p after the first ':' in
-	 * the pattern "<i2c_device>:<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
+	 * the pattern "<i2c_device>:<i2c_addr>:<gpiochip>:<[n]gpioline>" */
 	p = strchr(p, ':');
 	if (!p) {
 		Log2(PCSC_LOG_ERROR, "No I2C slave address defined in '%s'", device);
@@ -85,12 +77,12 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	Log2(PCSC_LOG_DEBUG, "i2c_device: %s", *i2c_device);
 	p++;
 
-	/* parse i2c_addr from the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
+	/* parse i2c_addr from the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>" */
 	*i2c_addr = (int)strtol(p, NULL, 0);
 	Log2(PCSC_LOG_DEBUG, "i2c_addr: %d", *i2c_addr);
 
 	/* Advance p after the first ':' in
-	 * the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>:<name>" */
+	 * the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>" */
 	p = strchr(p, ':');
 	if (!p) {
 		free(*i2c_device);
@@ -100,12 +92,12 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	}
 	p++;
 
-	/* parse the gpiochip from the pattern "<gpiochip>:<[n]gpioline>:name" */
+	/* parse the gpiochip from the pattern "<gpiochip>:<[n]gpioline>" */
 	*gpiochip = (int)strtol(p, NULL, 0);
 	Log2(PCSC_LOG_DEBUG, "gpiochip: %d", *gpiochip);
 
 	/* Advance p after the first ':' in
-	 * the pattern "<gpiochip>:<[n]gpioline>:<name>" */
+	 * the pattern "<gpiochip>:<[n]gpioline>" */
 	p = strchr(p, ':');
 	if (!p) {
 		free(*i2c_device);
@@ -124,20 +116,9 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	}
 	Log2(PCSC_LOG_DEBUG, "gpioline_active_low: %d", *gpioline_active_low);
 
-	/* parse reset_pin from the pattern "<gpioline>:<name>" */
+	/* parse reset_pin from the pattern "<gpioline>" */
 	*gpioline = (size_t)strtol(p, NULL, 0);
 	Log2(PCSC_LOG_DEBUG, "gpioline: %d", *gpioline);
-
-	/* Advance p after the first ':' in
-	 * the pattern "<gpioline>:<name>" */
-	p = strchr(p, ':');
-	if (!p) {
-		*reader_name = strdup("Kerkey");
-	} else {
-		p++;
-		*reader_name = strdup(p);
-	}
-	Log2(PCSC_LOG_DEBUG, "reader_name: %s", *reader_name);
 
 	return 0;
 }
@@ -470,7 +451,6 @@ int kerkey_open(struct reader *r, char *device)
 	int gpiochip;
 	int gpioline;
 	int gpioline_active_low;
-	char *reader_name = NULL;
 	struct kerkey_dev *dev;
 
 	Log2(PCSC_LOG_DEBUG, "device: %s", device);
@@ -483,15 +463,9 @@ int kerkey_open(struct reader *r, char *device)
 
 	/* Parse device string from reader.conf */
 	int ret = parse_device_string(device, &i2c_device, &i2c_addr, &gpiochip,
-			&gpioline, &gpioline_active_low, &reader_name);
+			&gpioline, &gpioline_active_low);
 	if (ret) {
 		Log2(PCSC_LOG_ERROR, "device string can't be parsed: %s", device);
-		goto fail;
-	}
-
-	ret = validate_reader_name(reader_name);
-	if (ret) {
-		Log2(PCSC_LOG_ERROR, "Reader name not supported: %s", reader_name);
 		goto fail;
 	}
 
@@ -501,7 +475,6 @@ int kerkey_open(struct reader *r, char *device)
 	dev->gpiochip = gpiochip;
 	dev->gpioline = gpioline;
 	dev->gpioline_active_low = gpioline_active_low;
-	dev->reader_name = reader_name;
 	dev->i2c_fd = -1;
 	dev->gpio_fd = -1;
 	dev->atr = NULL;
@@ -535,7 +508,6 @@ int kerkey_open(struct reader *r, char *device)
 	return 0;
 fail:
 	free(i2c_device);
-	free(reader_name);
 	free(dev);
 	return -1;
 }
@@ -547,7 +519,6 @@ int kerkey_close(struct reader *r)
 	close_kerkey_dev(dev);
 
 	free(dev->i2c_device);
-	free(dev->reader_name);
 	free(dev);
 
 	return 0;
