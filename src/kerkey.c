@@ -616,11 +616,13 @@ read_res:
 		goto read_res;
 	}
 
-	if (tx_len != 0) {
-		if (chain && rlen == 0x00)
+	if (chain && rlen == 0x00) {
+		if (tx_len != 0)
 			goto send;
-
-		Log1(PCSC_LOG_DEBUG, "Response although no everything sent!");
+		else {
+			Log1(PCSC_LOG_ERROR, "Communication error!");
+			return -1;
+		}
 	}
 
 	if (rx_off + rlen > rx_buf_len) {
