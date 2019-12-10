@@ -27,7 +27,8 @@ cat /etc/reader.conf.d/libifdkerkey
 #  - GPIOCHIP is the reset pin chip
 #  - GPIOLINE is the reset pin line (prefix with 'n' for active low)
 # example: /dev/i2c-3:0x20:1:n16
-#DEVICENAME        /dev/i2c-N:CS:GPIOCHIP:GPIOLINE
+# example: /dev/i2c-9:0x20
+#DEVICENAME        /dev/i2c-N:CS[:GPIOCHIP:GPIOLINE]
 #FRIENDLYNAME      "ST Kerkey (I2C)"
 #LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so
 

@@ -85,10 +85,11 @@ static int parse_device_string(char *device, char **i2c_device, int *i2c_addr,
 	 * the pattern "<i2c_addr>:<gpiochip>:<[n]gpioline>" */
 	p = strchr(p, ':');
 	if (!p) {
-		free(*i2c_device);
-		*i2c_device = NULL;
-		Log2(PCSC_LOG_ERROR, "No reset pin defined in '%s'", device);
-		return -1;
+		Log2(PCSC_LOG_INFO, "No reset pin defined for '%s'", device);
+		*gpiochip = -1;
+		*gpioline = -1;
+		*gpioline_active_low = -1;
+		return 0;
 	}
 	p++;
 
@@ -205,6 +206,9 @@ static int kerkey_power_up_gpio(struct kerkey_dev *dev)
 	int ret;
 	struct gpiohandle_data data;
 
+	if (dev->gpio_fd == -1)
+		return 0;
+
 	data.values[0] = 1;
 
 	ret = ioctl(dev->gpio_fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
@@ -220,6 +224,9 @@ static int kerkey_power_down_gpio(struct kerkey_dev *dev)
 {
 	int ret;
 	struct gpiohandle_data data;
+
+	if (dev->gpio_fd == -1)
+		return 0;
 
 	data.values[0] = 0;
 
@@ -238,6 +245,11 @@ static int open_kerkey_gpio(struct kerkey_dev *dev)
 	char *chrdev_name;
 	struct gpiohandle_request req;
 	int fd;
+
+	if (dev->gpiochip == -1) {
+		dev->gpio_fd = -1;
+		return 0;
+	}
 
 	ret = asprintf(&chrdev_name, "/dev/gpiochip%d", dev->gpiochip);
 	if (ret < 0)
