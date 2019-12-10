@@ -151,7 +151,7 @@ static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t le
 		if (sret == (ssize_t)len) {
 			/* Done */
 			return 0;
-		} else if (sret == -1 && (errno == ENXIO || errno == ETIMEDOUT)) {
+		} else if (sret == -1 && (errno == ENXIO || errno == ETIMEDOUT || errno == EREMOTEIO)) {
 			/* Kerkey not ready yet, let's wait 1 ms */
 			int ret = usleep(1000);
 			if (ret) {
