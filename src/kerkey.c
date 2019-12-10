@@ -38,6 +38,8 @@
 #define KERKEY_CMD_TIMEOUT 0x75
 #define KERKEY_CMD_ATR 0x76
 
+#define I2C_FRAME_LENGTH_MAX 254
+
 struct kerkey_dev
 {
 	/* parsed data */
@@ -585,7 +587,7 @@ int kerkey_xfer(struct reader *r, unsigned char *tx_buf, size_t tx_len, unsigned
 send:
 	Log2(PCSC_LOG_DEBUG, "tx_len: %zu", tx_len);
 
-	len = tx_len > 254 ? 254 : tx_len;
+	len = tx_len > I2C_FRAME_LENGTH_MAX ? I2C_FRAME_LENGTH_MAX : tx_len;
 
 	ret = kerkey_write_i2c(dev, tx_buf + tx_off, len);
 	if (ret) {
