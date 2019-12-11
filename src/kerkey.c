@@ -147,11 +147,11 @@ static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t le
 				strerror(errno));
 			return -1;
 		} else {
-			Log1(PCSC_LOG_ERROR, "Could not read length from I2C device");
+			Log3(PCSC_LOG_ERROR, "Read only %zi of %zu bytes", sret, len);
 			return -1;
 		}
 		counter++;
-	} while(counter < max_attempts);
+	} while (counter < max_attempts);
 
 	Log1(PCSC_LOG_ERROR, "Read timed out");
 	return -1;
@@ -159,16 +159,33 @@ static int kerkey_read_i2c(struct kerkey_dev *dev, unsigned char *buf, size_t le
 
 static int kerkey_write_i2c(struct kerkey_dev *dev, const unsigned char *buf, size_t len)
 {
-	ssize_t sret = write(dev->i2c_fd, buf, len);
-	if (sret == -1) {
-		Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
-			strerror(errno));
-		return -1;
-	} else if (sret != (ssize_t)len) {
-		Log3(PCSC_LOG_ERROR, "Wrote only %zi of %zu bytes", sret, len);
-		return -1;
-	}
-	return 0;
+	const size_t max_attempts = dev->timeout_ms;
+	size_t counter = 0;
+	do {
+		ssize_t sret = write(dev->i2c_fd, buf, len);
+		if (sret == (ssize_t)len) {
+			/* Done */
+			return 0;
+		} else if (sret == -1 && (errno == ENXIO || errno == ETIMEDOUT || errno == EREMOTEIO)) {
+			/* Kerkey not ready yet, let's wait 1 ms */
+			int ret = usleep(1000);
+			if (ret) {
+				Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
+				return -1;
+			}
+		} else if (sret == -1) {
+			Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
+				strerror(errno));
+			return -1;
+		} else {
+			Log3(PCSC_LOG_ERROR, "Wrote only %zi of %zu bytes", sret, len);
+			return -1;
+		}
+		counter++;
+	} while (counter < max_attempts);
+
+	Log1(PCSC_LOG_ERROR, "Write timed out");
+	return -1;
 }
 
 static int open_kerkey_i2c(struct kerkey_dev *dev)
