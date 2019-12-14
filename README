@@ -2,36 +2,83 @@ IFDHandler for the ST Kerkey
 ============================
 
 This library contains an IFD handler for PCSC lite [1],
-which allows to access the Kerkey via the PCSC lite daemon.
+which allows to access the ST Kerkey or devices with similar
+protocol (e.g. STSAFE) via the PCSC lite daemon.
 
 The library uses two Linux kernel interfaces to interact
 with the ST Kerkey:
 
  * I2C dev ([2]) for data exchange
- * GPIO sysfs aka. gpiolib ([3]) for resetting the device
+ * GPIO sysfs API ([3]) or character device API ([4]) optional reset control
 
-Usage
-=====
+Building
+========
 
-To use this IFDHandler one needs to specify the reader
-in the reader configuration directory of PCSC lite.
-To do so one has to create a file which specifies the
-communication parameters.
+To build the library simply use this command:
 
-Below is an example how this specification could look like:
+  make
 
-cat /etc/reader.conf.d/libifdkerkey
-# ST Kerkey with I2C communication
-#  - N is the I2C bus
-#  - CS is the I2C device address
-#  - GPIOCHIP is the reset pin chip
-#  - GPIOLINE is the reset pin line (prefix with 'n' for active low)
-# example: /dev/i2c-3:0x20:1:n16
-# example: /dev/i2c-9:0x20
-#DEVICENAME        /dev/i2c-N:CS[:GPIOCHIP:GPIOLINE]
-#FRIENDLYNAME      "ST Kerkey (I2C)"
-#LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so
+Cross-compilation is supported by setting the CROSS_COMPILE environment
+variable.
+
+Installation
+============
+
+To install the library you can copy the built library to a location
+of your choice. E.g.:
+
+  sudo cp src/libifdkerkey.so /usr/local/pcsc/drivers/i2c/libifdkerkey.so
+
+Integration and configuration
+=============================
+
+The integration of the IFDHandler library in PCSC lite
+can be achieved by storing configuration files in
+the reader configuration directory
+(typically /etc/reader.conf.d).
+
+Details about the PCSC lite configuration file
+syntax can be found in the corresponding man page
+(man 5 reader.conf).
+
+Besides the PCSC lite integration, the configuration
+file also provides parameters to libifdkerkey, that
+set the communication properties (I2C and GPIO settings).
+
+Details about the libifdkerkey specific configuration
+can be found in the file libifdkerkey.
+A good approach is to copy that into
+/etc/reader.conf.d/ and edit as needed:
+
+  sudo cp libifdkerkey /etc/reader.conf.d/
+
+After changing the configuration file a restart
+of PCSC lite is required:
+
+  sudo systemctl restart pcscd
+
+Debugging
+=========
+
+In case of issues the following commands can help
+to isolate the problem.
+
+Checking the status of PCSC lite:
+
+  systemctl status pcscd
+
+Checking if the reader has been found:
+
+  pcsc_scan
+
+Checking logs (continuously):
+
+  journalctl -f
+
+Configuration
+=============
 
 [1] https://pcsclite.alioth.debian.org/
 [2] https://www.kernel.org/doc/Documentation/i2c/dev-interface
 [3] https://www.kernel.org/doc/Documentation/gpio/sysfs.txt
+[4] https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/gpio.h

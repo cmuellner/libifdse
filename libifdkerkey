@@ -1,0 +1,28 @@
+# Configuration file to interact with the ST Kerkey
+
+# FRIENDLYNAME defines the name that's used as reader name
+FRIENDLYNAME      "ST STSAFE-J100 (I2C)"
+
+# DEVICENAME defines the communication parameters
+# The following forms are possible
+# 1) No reset line
+#   /dev/i2c-N:CS
+# 2) Reset line controlled via Linux gpiochip API
+#   /dev/i2c-N:CS:GPIOCHIP:GPIOLINE
+# 3) Reset line controlled via Linux sysfs API
+#   /dev/i2c-N:CS:GPIO
+#
+#  - N is the I2C bus
+#  - CS is the I2C device address
+#  - GPIOCHIP is the reset pin chip
+#  - GPIOLINE is the reset pin line (prefix with 'n' for active low)
+#  - GPIO is the reset pin GPIO number (prefix with 'n' for active low)
+#
+# Examples:
+# DEVICENAME      /dev/i2c-3:0x20
+# DEVICENAME      /dev/i2c-3:0x20:1:n16
+# DEVICENAME      /dev/i2c-3:0x20:16
+
+# LIBPATH...path to the libifdkerkey.so
+LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so
+
