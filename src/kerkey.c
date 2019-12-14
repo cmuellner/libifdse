@@ -28,7 +28,7 @@
 #include <sys/stat.h>
 
 #include <linux/i2c-dev.h>
-#include <linux/gpio.h>
+#include "ext/gpio.h"
 
 #include <debuglog.h>
 
