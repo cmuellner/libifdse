@@ -32,7 +32,7 @@
 
 #include <debuglog.h>
 
-#include "utils.h"
+#include "reader.h"
 #include "kerkey.h"
 
 #define KERKEY_CMD_TIMEOUT 0x75

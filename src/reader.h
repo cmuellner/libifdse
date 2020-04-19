@@ -15,8 +15,8 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef UTILS_H_
-#define UTILS_H_
+#ifndef READER_H_
+#define READER_H_
 
 #include <stdbool.h>
 #include <wintypes.h>
@@ -44,4 +44,4 @@ void* get_reader_prv(struct reader *r);
 /* Free the reader */
 void free_reader(struct reader *r);
 
-#endif /* UTILS_H_ */
+#endif /* READER_H_ */

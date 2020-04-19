@@ -1,7 +1,7 @@
 CFLAGS+=-fPIC -Iext
 LDFLAGS+=-shared
 
-SRC=ifdhandler.c kerkey.c utils.c
+SRC=ifdhandler.c kerkey.c reader.c
 OBJ=$(patsubst %.c,%.o, $(SRC))
 
 all: libifdkerkey.so

@@ -19,7 +19,7 @@
 #include <ifdhandler.h>
 #include <debuglog.h>
 
-#include "utils.h"
+#include "reader.h"
 #include "kerkey.h"
 
 #ifndef IFDHANDLERv2

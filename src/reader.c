@@ -16,7 +16,7 @@
  */
 
 #include <stddef.h>
-#include "utils.h"
+#include "reader.h"
 
 struct reader
 {

@@ -20,7 +20,7 @@
 
 #include <stdint.h>
 
-#include "utils.h"
+struct reader *t;
 
 int kerkey_open(struct reader *r, char *device);
 
