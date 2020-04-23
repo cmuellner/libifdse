@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Christoph Muellner
+ * Copyright (C) 2017-2020 Christoph Muellner
  *
  * This program is free software: you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -19,28 +19,20 @@
 #include <ifdhandler.h>
 #include <debuglog.h>
 
-#include "reader.h"
-#include "kerkey.h"
+#include "halse.h"
 
 #ifndef IFDHANDLERv2
 
 RESPONSECODE IFDHCreateChannelByName(DWORD Lun, LPSTR DeviceName)
 {
-	if (reader_exists(Lun)) {
+	if (halse_exists(Lun)) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx already open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
-	struct reader *r = create_reader(Lun);
+	struct halse_dev *r = halse_open(Lun, DeviceName);
 	if (r == NULL) {
-		Log1(PCSC_LOG_ERROR, "Could not create reader!");
-		return IFD_NO_SUCH_DEVICE;
-	}
-
-	int ret = kerkey_open(r, DeviceName);
-	if (ret) {
-		free_reader(r);
-		Log1(PCSC_LOG_ERROR, "Could not open kerkey!");
+		Log1(PCSC_LOG_ERROR, "Could not create SE!");
 		return IFD_NO_SUCH_DEVICE;
 	}
 
@@ -86,16 +78,14 @@ RESPONSECODE IFDHCreateChannel(DWORD Lun, DWORD Channel)
 
 RESPONSECODE IFDHCloseChannel(DWORD Lun)
 {
-	struct reader *r = get_reader(Lun);
-	if (r == NULL) {
+	struct halse_dev *dev = halse_get(Lun);
+	if (!dev) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx not open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
-	int ret = kerkey_close(r);
-	free_reader(r);
-	if (ret)
-		return IFD_COMMUNICATION_ERROR;
+	dev->close(dev);
+	halse_free(Lun);
 
 	return IFD_SUCCESS;
 }
@@ -105,21 +95,21 @@ RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag, PDWORD Length,
 {
 	int ret;
 
-	struct reader *r = get_reader(Lun);
-	if (r == NULL) {
+	struct halse_dev *dev = halse_get(Lun);
+	if (!dev) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx not open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
 	switch (Tag) {
 		case TAG_IFD_ATR:
-			ret = kerkey_get_atr(r, Value, (size_t*)Length);
+			ret = dev->get_atr(dev, Value, (size_t*)Length);
 			if (ret)
 				return IFD_COMMUNICATION_ERROR;
 			break;
 
 		case TAG_IFD_SIMULTANEOUS_ACCESS:
-			Value[0] = MAX_KERKEY_DEVICES;
+			Value[0] = MAX_SE_DEVICES;
 			*Length = 1;
 			break;
 
@@ -170,30 +160,31 @@ RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action, PUCHAR Atr, PDWORD
 	AtrLength)
 {
 	int ret;
-	struct reader *r = get_reader(Lun);
-	if (r == NULL) {
+
+	struct halse_dev *dev = halse_get(Lun);
+	if (!dev) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx not open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
 	if (Action == IFD_POWER_UP) {
-		ret = kerkey_power_up(r);
+		ret = dev->power_up(dev);
 		if (ret)
 			return IFD_ERROR_POWER_ACTION;
-		ret = kerkey_get_atr(r, Atr, (size_t*)AtrLength);
+		ret = dev->get_atr(dev, Atr, (size_t*)AtrLength);
 		if (ret)
 			return IFD_COMMUNICATION_ERROR;
 	} else if (Action == IFD_POWER_DOWN) {
-		ret = kerkey_power_down(r);
+		ret = dev->power_down(dev);
 		if (ret)
 			return IFD_ERROR_POWER_ACTION;
 		memset(Atr, 0, *AtrLength);
 		*AtrLength = 0;
 	} else if (Action == IFD_RESET) {
-		ret = kerkey_warm_reset(r);
+		ret = dev->warm_reset(dev);
 		if (ret)
 			return IFD_ERROR_POWER_ACTION;
-		ret = kerkey_get_atr(r, Atr, (size_t*)AtrLength);
+		ret = dev->get_atr(dev, Atr, (size_t*)AtrLength);
 		if (ret)
 			return IFD_COMMUNICATION_ERROR;
 	} else
@@ -208,15 +199,15 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 {
 	int ret;
 
-	struct reader *r = get_reader(Lun);
-	if (r == NULL) {
+	struct halse_dev *dev = halse_get(Lun);
+	if (!dev) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx not open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
 	memcpy(RecvPci, &SendPci, sizeof(SendPci));
 
-	ret = kerkey_xfer(r, TxBuffer, TxLength, RxBuffer, (size_t*)RxLength);
+	ret = dev->xfer(dev, TxBuffer, TxLength, RxBuffer, (size_t*)RxLength);
 	if (ret)
 		return IFD_COMMUNICATION_ERROR;
 
@@ -225,12 +216,12 @@ RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 
 RESPONSECODE IFDHICCPresence(DWORD Lun)
 {
-	struct reader *r = get_reader(Lun);
-	if (r == NULL) {
+	struct halse_dev *dev = halse_get(Lun);
+	if (!dev) {
 		Log2(PCSC_LOG_ERROR, "Lun 0x%lx not open!", Lun);
 		return IFD_NO_SUCH_DEVICE;
 	}
 
-	/* A kerkey cannot be removed... */
+	/* A SE cannot be removed... */
 	return IFD_SUCCESS;
 }

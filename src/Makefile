@@ -1,7 +1,16 @@
 CFLAGS+=-fPIC -Iext
 LDFLAGS+=-shared
 
-SRC=ifdhandler.c kerkey.c reader.c
+SRC=\
+	halgpio.c \
+	halgpio_kernel.c \
+	halgpio_sysfs.c \
+	hali2c.c \
+	hali2c_kernel.c \
+	halse.c \
+	ifdhandler.c \
+	halse_kerkey.c \
+
 OBJ=$(patsubst %.c,%.o, $(SRC))
 
 all: libifdkerkey.so
