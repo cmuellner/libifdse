@@ -22,8 +22,10 @@
 #include "halse.h"
 #include "helpers.h"
 #include "halse_kerkey.h"
+#include "halse_se05x.h"
 
 static const char* halse_kerkey_id = "kerkey";
+static const char* halse_se05x_id = "se05x";
 
 struct lun_se {
 	bool in_use;
@@ -52,6 +54,8 @@ static struct halse_dev* halse_parse(char* config)
 
 	if (starts_with(halse_kerkey_id, p))
 		return halse_open_kerkey(args);
+	else if (starts_with(halse_se05x_id, p))
+		return halse_open_se05x(args);
 
 	Log2(PCSC_LOG_ERROR, "Unknown SE provider: '%s'!", p);
 	return NULL;

@@ -1,7 +1,7 @@
-# Configuration file to interact with the ST Kerkey
+# Configuration file to interact with an I2C-attached secure element
 
 # FRIENDLYNAME defines the name that's used as reader name
-FRIENDLYNAME      "ST STSAFE-J100 (I2C)"
+FRIENDLYNAME      "I2C-attached secure element"
 
 # DEVICENAME defines the communication parameters
 # The following forms are possible
@@ -18,10 +18,10 @@ FRIENDLYNAME      "ST STSAFE-J100 (I2C)"
 #  - GPIOLINE is the reset pin line (prefix with 'n' for active low)
 #  - GPIO is the reset pin GPIO number (prefix with 'n' for active low)
 #
-# Example:
-# DEVICENAME      se:kerkey@i2c:kernel:/dev/i2c-3:0x20@gpio:sysfs:n16
-# DEVICENAME      se:kerkey@i2c:kernel:/dev/i2c-9:0x20
-
+# Examples:
+# DEVICENAME se:kerkey@i2c:kernel:/dev/i2c-3:0x20@gpio:sysfs:n16
+# DEVICENAME se:kerkey@i2c:kernel:/dev/i2c-9:0x20
+# DEVICENAME se:se05x@i2c:kernel:/dev/i2c-9:0x48
 
 # LIBPATH...path to the libifdkerkey.so
 LIBPATH           /usr/local/pcsc/drivers/i2c/libifdkerkey.so

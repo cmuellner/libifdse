@@ -8,8 +8,9 @@ SRC=\
 	hali2c.c \
 	hali2c_kernel.c \
 	halse.c \
-	ifdhandler.c \
 	halse_kerkey.c \
+	halse_se05x.c \
+	ifdhandler.c \
 
 OBJ=$(patsubst %.c,%.o, $(SRC))
 
