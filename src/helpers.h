@@ -17,4 +17,9 @@ static inline int starts_with(const char *pre, const char *str)
     return lenstr < lenpre ? 0 : memcmp(pre, str, lenpre) == 0;
 }
 
+static inline uint16_t swap_uint16(uint16_t v)
+{
+	return (v << 8) | (v >> 8);
+}
+
 #endif /* HELPERS_H_ */
