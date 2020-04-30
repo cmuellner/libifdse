@@ -19,6 +19,7 @@
 #define HALGPIO_H_
 
 #include <stddef.h>
+#include <errno.h>
 
 struct halgpio_dev {
 	int (*enable)(struct halgpio_dev* device);
@@ -26,6 +27,44 @@ struct halgpio_dev {
 	void (*close)(struct halgpio_dev* device);
 };
 
+/*
+ * Enable the GPIO line.
+ *
+ * Return 0 on success, or -ve on error.
+ */
+static inline int halgpio_enable(struct halgpio_dev *dev)
+{
+	if (!dev)
+		return 0;
+	if (!dev->enable)
+		return -ENODEV;
+	return dev->enable(dev);
+}
+
+/*
+ * Disable the GPIO line.
+ *
+ * Return 0 on success, or -ve on error.
+ */
+static inline int halgpio_disable(struct halgpio_dev *dev)
+{
+	if (!dev)
+		return 0;
+	if (!dev->disable)
+		return -ENODEV;
+	return dev->disable(dev);
+}
+
+static inline void halgpio_close(struct halgpio_dev *dev)
+{
+	if (dev && dev->close)
+		dev->close(dev);
+}
+
+/*
+ * Create a new halgpio_dev device based the configuration string.
+ * Returns the new object on success, or NULL otherwise.
+ */
 struct halgpio_dev* halgpio_open(char* config);
 
 #endif /* HALGPIO_H_ */
