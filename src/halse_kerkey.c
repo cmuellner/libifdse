@@ -39,6 +39,8 @@
 
 #define I2C_FRAME_LENGTH_MAX 254
 
+#define GUARD_TIME_US 1000
+
 struct halse_kerkey_dev
 {
 	/* Embed halse device */
@@ -56,97 +58,12 @@ struct halse_kerkey_dev
 
 static inline int halse_kerkey_read_i2c(struct halse_kerkey_dev *dev, unsigned char *buf, size_t len)
 {
-	const size_t max_attempts = dev->timeout_ms;
-	size_t counter = 0;
-
-	do {
-		int ret = dev->i2c_dev->read(dev->i2c_dev, buf, len);
-
-		if (ret == (int)len) {
-			/* Done */
-			return 0;
-		} else if (ret == -ENXIO || ret == -ETIMEDOUT || ret == -EREMOTEIO) {
-			/* Kerkey not ready yet, let's wait 1 ms */
-			int ret = usleep(1000);
-
-			if (ret) {
-				Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
-				return -1;
-			}
-		} else if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "Reading from I2C device failed (%s)",
-				strerror(errno));
-			return -1;
-		} else {
-			Log3(PCSC_LOG_ERROR, "Read only %i of %zu bytes", ret, len);
-			return -1;
-		}
-		counter++;
-	} while (counter < max_attempts);
-
-	Log1(PCSC_LOG_ERROR, "Read timed out");
-
-	return -1;
+	return hali2c_read_with_retry(dev->i2c_dev, buf, len, dev->timeout_ms, GUARD_TIME_US);
 }
 
 static inline int halse_kerkey_write_i2c(struct halse_kerkey_dev *dev, const unsigned char *buf, size_t len)
 {
-	const size_t max_attempts = dev->timeout_ms;
-	size_t counter = 0;
-
-	do {
-		int ret = dev->i2c_dev->write(dev->i2c_dev, buf, len);
-
-		if (ret == (int)len) {
-			/* Done */
-			return 0;
-		} else if (ret == -ENXIO || ret == -ETIMEDOUT || ret == -EREMOTEIO) {
-			/* Kerkey not ready yet, let's wait 1 ms */
-			int ret = usleep(1000);
-
-			if (ret) {
-				Log1(PCSC_LOG_ERROR, "Calling usleep failed!");
-				return -1;
-			}
-		} else if (ret < 0) {
-			Log2(PCSC_LOG_ERROR, "Writing to I2C device failed (%s)",
-				strerror(errno));
-			return -1;
-		} else {
-			Log3(PCSC_LOG_ERROR, "Wrote only %i of %zu bytes", ret, len);
-			return -1;
-		}
-		counter++;
-	} while (counter < max_attempts);
-
-	Log1(PCSC_LOG_ERROR, "Write timed out");
-
-	return -1;
-}
-
-static inline void halse_kerkey_close_i2c(struct halse_kerkey_dev *dev)
-{
-	dev->i2c_dev->close(dev->i2c_dev);
-}
-
-static inline int halse_kerkey_enable_gpio(struct halse_kerkey_dev *dev)
-{
-	if (dev->gpio_dev)
-		return dev->gpio_dev->enable(dev->gpio_dev);
-	return 0;
-}
-
-static inline int halse_kerkey_disable_gpio(struct halse_kerkey_dev *dev)
-{
-	if (dev->gpio_dev)
-		return dev->gpio_dev->disable(dev->gpio_dev);
-	return 0;
-}
-
-static inline void halse_kerkey_close_gpio(struct halse_kerkey_dev *dev)
-{
-	if (dev->gpio_dev)
-		dev->gpio_dev->close(dev->gpio_dev);
+	return hali2c_write_with_retry(dev->i2c_dev, buf, len, dev->timeout_ms, GUARD_TIME_US);
 }
 
 static int halse_kerkey_get_timeout(struct halse_kerkey_dev *dev)
@@ -303,7 +220,7 @@ static int halse_kerkey_open(struct halse_kerkey_dev *dev)
 {
 	int ret;
 
-	ret = halse_kerkey_disable_gpio(dev);
+	ret = halgpio_disable(dev->gpio_dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not power down Kerkey!");
 		return -1;
@@ -315,7 +232,7 @@ static int halse_kerkey_open(struct halse_kerkey_dev *dev)
 		return -1;
 	}
 
-	ret = halse_kerkey_enable_gpio(dev);
+	ret = halgpio_enable(dev->gpio_dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not power up Kerkey!");
 		return -1;
@@ -331,16 +248,16 @@ static int halse_kerkey_open(struct halse_kerkey_dev *dev)
 	ret = halse_kerkey_warm_reset_dev(dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not reset Kerkey!");
-		halse_kerkey_close_i2c(dev);
-		halse_kerkey_close_gpio(dev);
+		hali2c_close(dev->i2c_dev);
+		halgpio_close(dev->gpio_dev);
 		return -1;
 	}
 
 	ret = halse_kerkey_get_timeout(dev);
 	if (ret) {
 		Log1(PCSC_LOG_ERROR, "Could not get timeout!");
-		halse_kerkey_close_i2c(dev);
-		halse_kerkey_close_gpio(dev);
+		hali2c_close(dev->i2c_dev);
+		halgpio_close(dev->gpio_dev);
 		return -1;
 	}
 
@@ -350,8 +267,8 @@ static int halse_kerkey_open(struct halse_kerkey_dev *dev)
 static void halse_kerkey_close(struct halse_dev *device)
 {
 	struct halse_kerkey_dev *dev = container_of(device, struct halse_kerkey_dev, device);
-	halse_kerkey_close_i2c(dev);
-	halse_kerkey_close_gpio(dev);
+	hali2c_close(dev->i2c_dev);
+	halgpio_close(dev->gpio_dev);
 }
 
 static int halse_kerkey_get_atr(struct halse_dev* device, unsigned char *buf, size_t *len)
@@ -372,7 +289,7 @@ static int halse_kerkey_get_atr(struct halse_dev* device, unsigned char *buf, si
 static int halse_kerkey_power_up(struct halse_dev *device)
 {
 	struct halse_kerkey_dev *dev = container_of(device, struct halse_kerkey_dev, device);
-	int ret = halse_kerkey_enable_gpio(dev);
+	int ret = halgpio_enable(dev->gpio_dev);
 
 	usleep(200*1000);
 
@@ -382,7 +299,7 @@ static int halse_kerkey_power_up(struct halse_dev *device)
 static int halse_kerkey_power_down(struct halse_dev *device)
 {
 	struct halse_kerkey_dev *dev = container_of(device, struct halse_kerkey_dev, device);
-	return halse_kerkey_disable_gpio(dev);
+	return halgpio_disable(dev->gpio_dev);
 }
 
 static int halse_kerkey_warm_reset(struct halse_dev *device)
