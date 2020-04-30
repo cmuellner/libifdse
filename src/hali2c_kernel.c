@@ -54,7 +54,7 @@ static int hali2c_kernel_parse(struct hali2c_kernel_dev *dev, char* config)
 	p = strchr(p, ':');
 	if (!p) {
 		Log2(PCSC_LOG_ERROR, "No I2C slave address defined in '%s'", config);
-		return -1;
+		return -EINVAL;
 	}
 	dev->i2c_device = strndup(config, p - config);
 	Log2(PCSC_LOG_DEBUG, "i2c_device: %s", dev->i2c_device);
@@ -65,7 +65,7 @@ static int hali2c_kernel_parse(struct hali2c_kernel_dev *dev, char* config)
 	dev->i2c_addr = (int)strtol(p, &endptr, 0);
 	if (errno != 0 || p == endptr) {
 		Log2(PCSC_LOG_ERROR, "Parser error: invalid I2C address in '%s'", p);
-		return -1;
+		return -EINVAL;
 	}
 
 	Log2(PCSC_LOG_DEBUG, "i2c_addr: %d", dev->i2c_addr);
@@ -75,23 +75,26 @@ static int hali2c_kernel_parse(struct hali2c_kernel_dev *dev, char* config)
 
 static int hali2c_kernel_open(struct hali2c_kernel_dev *dev)
 {
+	int ret;
+
 	/* Open I2C device */
 	dev->i2c_fd = open(dev->i2c_device, O_RDWR);
-	if (dev->i2c_fd == -1) {
-		Log3(PCSC_LOG_ERROR, "Could not open I2C device %s (%s)",
-			dev->i2c_device, strerror(errno));
-		return -1;
+	if (dev->i2c_fd < 0) {
+		Log3(PCSC_LOG_ERROR, "Could not open I2C device %s (%d)",
+			dev->i2c_device, dev->i2c_fd);
+		return dev->i2c_fd;
 	}
 
 	Log3(PCSC_LOG_DEBUG, "I2C fd (%s): %d", dev->i2c_device, dev->i2c_fd);
 
 	/* Set the slave address */
-	if (ioctl(dev->i2c_fd, I2C_SLAVE, dev->i2c_addr) < 0) {
-		Log3(PCSC_LOG_ERROR, "Could not set I2C address %d (%s)",
-			dev->i2c_addr, strerror(errno));
+	ret = ioctl(dev->i2c_fd, I2C_SLAVE, dev->i2c_addr);
+	if (ret < 0) {
+		Log2(PCSC_LOG_ERROR, "Could not set I2C address: %d",
+			dev->i2c_addr);
 		close(dev->i2c_fd);
 		dev->i2c_fd = -1;
-		return -1;
+		return -errno;
 	}
 
 	return 0;
