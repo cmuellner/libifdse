@@ -109,7 +109,7 @@ static int halgpio_kernel_open(struct halgpio_kernel_dev *dev)
 
 	req.lineoffsets[0] = dev->gpioline;
 	req.flags = GPIOHANDLE_REQUEST_OUTPUT;
-	strcpy(req.consumer_label, "libifdkerkey");
+	strcpy(req.consumer_label, "libifdse");
 	req.lines = 1;
 	req.default_values[0] = 0;
 

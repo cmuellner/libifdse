@@ -1,0 +1,31 @@
+# Configuration file to interact with an I2C-attached secure element
+
+# FRIENDLYNAME defines the name that's used as reader name
+FRIENDLYNAME      "I2C-attached secure element"
+
+# DEVICENAME defines the communication parameters and has the following form:
+#
+#   se:$PROTOCOL@i2c:$I2CDRIVER:$I2CARG1:...[@gpio:$GPIODRIVER:$GPIOARG1:...]
+#
+# PROTOCOL can be one of the following:
+# * "kerkey"...for ST Kerkey protocol
+# * "se05x"...for NXP SE05x protocol (UM11225)
+#
+# I2CDRIVER can be one of the following:
+# * "kernel"...for access via Linux kernel API (I2CARG1 is the device, e.g. /dev/i2c-9)
+#
+# GPIODRIVER is optional and can be one of the following:
+# * "kernel"...for access via Linux kernel API
+#   arguments are GPIOCHIP:GPIOLINE with an optional 'n' prefix for active low reset operation
+# * "sysfs"...for access via Linux' sysfs API
+#   arguments are GPIO, with an optional 'n' prefix for active low reset operation
+#
+# Examples:
+# DEVICENAME se:kerkey@i2c:kernel:/dev/i2c-3:0x20@gpio:kernel:1:n7
+# DEVICENAME se:kerkey@i2c:kernel:/dev/i2c-3:0x20@gpio:sysfs:n16
+# DEVICENAME se:kerkey@i2c:kernel:/dev/i2c-9:0x20
+# DEVICENAME se:se05x@i2c:kernel:/dev/i2c-9:0x48
+
+# LIBPATH...path to the libifdse.so
+LIBPATH           /usr/local/pcsc/drivers/i2c/libifdse.so
+
