@@ -396,6 +396,11 @@ static int halse_se05x_recv_block(struct halse_se05x_dev *dev, size_t *len)
 		return -1;
 	}
 
+	if (dev->rxbuf[2] > SIZE_INF_MAX) {
+		Log3(PCSC_LOG_ERROR, "Invalid LEN received: (%d > %d)", dev->rxbuf[2], SIZE_INF_MAX);
+		return -1;
+	}
+
 	*len = dev->rxbuf[2];
 	if (*len) {
 		size_t off = SIZE_PROLOGUE + SIZE_EPILOGUE;
