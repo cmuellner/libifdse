@@ -93,6 +93,13 @@ enum cmd_error {
 };
 #define CMD_ERROR_MASK 0x03
 
+/* This ATR is also reported by real NXP SE05x device. */
+static const uint8_t noreset_atr[] = {
+	0x3B, 0xFA, 0x96, 0x00, 0x00, 0x80, 0x11, 0xFE,
+	0x4A, 0x43, 0x4F, 0x50, 0x34, 0x20, 0x41, 0x54,
+	0x50, 0x4F, 0x0B,
+};
+
 struct halse_se05x_dev
 {
 	/* Embed halse device */
@@ -122,6 +129,12 @@ struct halse_se05x_dev
 	size_t txlen;
 	bool txretransmit;
 	unsigned char rxbuf[SIZE_PROLOGUE + SIZE_INF_MAX + SIZE_EPILOGUE];
+
+	/*
+	 * If set and, reset signaling (using i2c protocol messages)
+	 * is disabled.
+	 */
+	bool noreset;
 };
 
 static int halse_se05x_recv_block(struct halse_se05x_dev *dev, size_t *len);
@@ -504,6 +517,9 @@ static int halse_se05x_hard_reset_dev(struct halse_se05x_dev *dev)
 {
 	int ret;
 
+	if (dev->noreset)
+		return 0;
+
 	ret = halse_se05x_send_s_block_noinf(dev, CMD_REQ, CMD_RESET);
 	if (ret) {
 		Log2(PCSC_LOG_ERROR, "Sending RESET command failed: %d", ret);
@@ -555,6 +571,9 @@ static int halse_se05x_parse(struct halse_se05x_dev *dev, char* config)
 				Log2(PCSC_LOG_ERROR, "Failed to parse GPIO configuration: '%s'", p);
 				return -1;
 			}
+		} else if (strcmp("noreset", p) == 0) {
+			Log1(PCSC_LOG_INFO, "Noreset is set");
+			dev->noreset = true;
 		} else {
 			Log2(PCSC_LOG_ERROR, "Invalid token in config string: '%s'", p);
 			return -1;
@@ -631,7 +650,18 @@ static void halse_se05x_close(struct halse_dev *device)
 static int halse_se05x_get_atr(struct halse_dev* device, unsigned char *buf, size_t *len)
 {
 	struct halse_se05x_dev *dev = container_of(device, struct halse_se05x_dev, device);
-	(void) dev;
+
+	if (dev->noreset && (dev->atr == NULL)) {
+		LogXxd(PCSC_LOG_INFO, "noreset-atr: ", noreset_atr, sizeof(noreset_atr));
+		memcpy(buf, noreset_atr, sizeof(noreset_atr));
+		*len = sizeof(noreset_atr);
+		return 0;
+	}
+
+	if (dev->atr == NULL) {
+		Log1(PCSC_LOG_ERROR, "SE05x has not yet reported an ATR.");
+		return -1;
+	}
 
 	/*
 	 * The SE05x has a non-standard ATR (see UM11225),
@@ -743,8 +773,14 @@ static int halse_se05x_power_down(struct halse_dev *device)
 static int halse_se05x_warm_reset(struct halse_dev *device)
 {
 	struct halse_se05x_dev *dev = container_of(device, struct halse_se05x_dev, device);
-	halse_se05x_clear_state(dev);
-	return halse_se05x_warm_reset_dev(dev);
+	if (!dev->noreset) {
+		halse_se05x_clear_state(dev);
+		return halse_se05x_warm_reset_dev(dev);
+	} else {
+		free(dev->atr);
+		dev->atr = NULL;
+		return 0;
+	}
 }
 
 static int halse_se05x_xfer(struct halse_dev *device, unsigned char *tx_buf, size_t tx_len, unsigned char *rx_buf, size_t *rx_len)
@@ -858,6 +894,8 @@ struct halse_dev* halse_open_se05x(char* config)
 		Log1(PCSC_LOG_ERROR, "Not enough memory!");
 		return NULL;
 	}
+
+	dev->noreset = false;
 
 	/* Parse device string from reader.conf */
 	ret = halse_se05x_parse(dev, config);
