@@ -621,6 +621,8 @@ static void halse_se05x_close(struct halse_dev *device)
 	dev->i2c_dev = NULL;
 	halgpio_close(dev->gpio_dev);
 	dev->gpio_dev = NULL;
+	free(dev->atr);
+	dev->atr = NULL;
 }
 
 /*
